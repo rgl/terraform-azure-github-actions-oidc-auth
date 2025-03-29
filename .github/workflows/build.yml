@@ -1,0 +1,27 @@
+name: Build
+on:
+  push:
+  workflow_dispatch:
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Azure login
+        uses: azure/login@v2 # see https://github.com/Azure/login
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Show Environment Variables
+        run: |
+          env | sort
+      - name: Use Azure
+        run: |
+          exec 2>&1
+          set -x
+          az account show
+          az group list
