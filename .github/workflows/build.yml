@@ -6,7 +6,7 @@ permissions:
   contents: read
   id-token: write
 jobs:
-  build:
+  build-with-azure-cli:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -18,10 +18,93 @@ jobs:
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
       - name: Show Environment Variables
         run: |
+          set -euo pipefail
           env | sort
       - name: Use Azure
         run: |
+          set -euo pipefail
           exec 2>&1
           set -x
-          az account show
-          az group list
+          az account show # get the subscription details.
+          az group list   # get the resource groups list.
+  build-with-curl:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Get Azure GitHub Actions OIDC ID Token
+        id: get_github_id_token
+        run: |
+          set -euo pipefail
+          # see https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect#updating-your-actions-for-oidc
+          GITHUB_ID_TOKEN=$(
+            curl \
+              --silent \
+              --show-error \
+              --fail-with-body \
+              --request GET \
+              --header "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+              "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=api://AzureADTokenExchange" \
+              | jq -r .value)
+          if [ -z "$GITHUB_ID_TOKEN" ]; then
+            exit 1
+          fi
+          echo "::add-mask::$GITHUB_ID_TOKEN"
+          echo "github_id_token=$GITHUB_ID_TOKEN" >> $GITHUB_OUTPUT
+      - name: Exchange Azure GitHub Actions OIDC ID Token for Azure AD Access Token
+        id: get_azure_access_token
+        env:
+          GITHUB_ID_TOKEN: ${{ steps.get_github_id_token.outputs.github_id_token }}
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+        run: |
+          set -euo pipefail
+          # see https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-client-creds-grant-flow#third-case-access-token-request-with-a-federated-credential
+          AZURE_ACCESS_TOKEN=$(
+            curl \
+              --silent \
+              --show-error \
+              --fail-with-body \
+              --request POST \
+              --header "Content-Type: application/x-www-form-urlencoded" \
+              --data-urlencode "client_id=$AZURE_CLIENT_ID" \
+              --data-urlencode "client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer" \
+              --data-urlencode "client_assertion=$GITHUB_ID_TOKEN" \
+              --data-urlencode "scope=https://management.azure.com/.default" \
+              --data-urlencode "grant_type=client_credentials" \
+              "https://login.microsoftonline.com/$AZURE_TENANT_ID/oauth2/v2.0/token" \
+              | jq -r .access_token)
+          if [ -z "$AZURE_ACCESS_TOKEN" ]; then
+            exit 1
+          fi
+          echo "::add-mask::$AZURE_ACCESS_TOKEN"
+          echo "azure_access_token=$AZURE_ACCESS_TOKEN" >> $GITHUB_OUTPUT
+      - name: Use Azure
+        env:
+          AZURE_ACCESS_TOKEN: ${{ steps.get_azure_access_token.outputs.azure_access_token }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+        run: |
+          set -euo pipefail
+          # get the subscription details.
+          # NB this is the equivalent of az account show.
+          # see https://learn.microsoft.com/en-us/rest/api/resources/subscriptions/get?view=rest-resources-2022-12-01
+          echo "Subscription:"
+          curl \
+            --silent \
+            --show-error \
+            --fail-with-body \
+            --request GET \
+            --header "Authorization: Bearer $AZURE_ACCESS_TOKEN" \
+            "https://management.azure.com/subscriptions/$AZURE_SUBSCRIPTION_ID?api-version=2022-12-01" \
+            | jq .
+          # get the resource groups list.
+          # NB this is the equivalent of az group list.
+          # see https://learn.microsoft.com/en-us/rest/api/resources/resource-groups/list?view=rest-resources-2021-04-01
+          echo "Resource groups:"
+          curl \
+            --silent \
+            --show-error \
+            --fail-with-body \
+            --request GET \
+            --header "Authorization: Bearer $AZURE_ACCESS_TOKEN" \
+            "https://management.azure.com/subscriptions/$AZURE_SUBSCRIPTION_ID/resourcegroups?api-version=2021-04-01" \
+            | jq .

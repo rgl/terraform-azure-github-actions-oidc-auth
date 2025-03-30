@@ -17,7 +17,10 @@ This will:
 * Configure GitHub Repository.
   * Add the Azure related environment variables as GitHub Actions Variables.
     * Please note that these values are not sensitive to me, as such, they are not saved as GitHub Actions Secrets, but YMMV.
-* Show how to trigger the example [Build GitHub Actions Workflow](https://github.com/rgl/terraform-azure-github-actions-oidc-auth/actions/workflows/build.yml) that tries to login into Azure and use some of its APIs using the Azure CLI.
+* Show the [Build GitHub Actions Workflow](https://github.com/rgl/terraform-azure-github-actions-oidc-auth/actions/workflows/build.yml).
+  * It has two example jobs:
+    1. `build-with-azure-cli`: Login into Azure using the [azure/login action](https://github.com/Azure/login), then use the Azure CLI to interact with Azure.
+    2. `build-with-curl`: Use `curl` to request a GitHub Actions OIDC ID Token, exchange it for an Azure Access Token, then interact with Azure.
 
 # Usage
 
